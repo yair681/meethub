@@ -229,7 +229,7 @@ export function useWebRTC({ roomCode, userId, userName }) {
         setIsWaiting(false);
         for (const p of participants) {
           if (!mounted) return;
-          setPeers(prev => ({ ...prev, [p.socketId]: { userId: p.userId, userName: p.userName, audio: p.audio, video: p.video, stream: null } }));
+          setPeers(prev => ({ ...prev, [p.socketId]: { socketId: p.socketId, userId: p.userId, userName: p.userName, audio: p.audio, video: p.video, stream: null } }));
           const pc = createPC(p.socketId, stream);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -239,7 +239,7 @@ export function useWebRTC({ roomCode, userId, userName }) {
 
       socket.on('user-joined', ({ socketId, userId: uid, userName: uName }) => {
         if (!mounted) return;
-        setPeers(prev => ({ ...prev, [socketId]: { userId: uid, userName: uName, audio: true, video: true, stream: null } }));
+        setPeers(prev => ({ ...prev, [socketId]: { socketId, userId: uid, userName: uName, audio: true, video: true, stream: null } }));
       });
 
       socket.on('offer', async ({ from, offer }) => {

@@ -38,18 +38,16 @@ export default function VideoTile({
 
   return (
     <div className={`video-tile relative group ${screenSharing ? 'screen-share' : ''}`}>
-      {showVideo ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={isLocal}
-          className="w-full h-full object-cover"
-          style={{ transform: isMirrored ? 'scaleX(-1)' : 'none' }}
-        />
-      ) : (
-        <Initials name={name} />
-      )}
+      {/* Always keep video in DOM — just hide it when not needed so srcObject stays set */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={isLocal}
+        className={`w-full h-full object-cover ${!showVideo ? 'hidden' : ''}`}
+        style={{ transform: isMirrored ? 'scaleX(-1)' : 'none' }}
+      />
+      {!showVideo && <Initials name={name} />}
 
       {/* Top right indicators */}
       <div className="absolute top-2 right-2 flex gap-1 flex-row-reverse">

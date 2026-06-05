@@ -2,16 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { socket } from '../socket';
 import { format } from 'date-fns';
 
-export default function ChatPanel({ roomCode, userName, onClose, chatAllowed = true }) {
-  const [messages, setMessages] = useState([]);
+export default function ChatPanel({ roomCode, userName, onClose, chatAllowed = true, messages = [] }) {
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
-
-  useEffect(() => {
-    const handler = (msg) => setMessages(prev => [...prev, msg]);
-    socket.on('chat-message', handler);
-    return () => socket.off('chat-message', handler);
-  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

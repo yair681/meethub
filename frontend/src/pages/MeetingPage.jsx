@@ -275,6 +275,8 @@ export default function MeetingPage() {
   const [error, setError] = useState(null);
   const [panel, setPanel] = useState(null);
   const [unreadChat, setUnreadChat] = useState(0);
+  const [chatMessages, setChatMessages] = useState([]);
+  const panelRef = useRef(null);
   const [showEmojis, setShowEmojis] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -361,6 +363,19 @@ export default function MeetingPage() {
   const handleLeave = useCallback(() => {
     navigate('/');
   }, [navigate]);
+
+  // Keep panelRef in sync so the chat listener can check if panel is open
+  useEffect(() => { panelRef.current = panel; }, [panel]);
+
+  // Persistent chat listener — stores all messages regardless of whether panel is open
+  useEffect(() => {
+    const handler = (msg) => {
+      setChatMessages(prev => [...prev, msg]);
+      if (panelRef.current !== 'chat') setUnreadChat(c => c + 1);
+    };
+    socket.on('chat-message', handler);
+    return () => socket.off('chat-message', handler);
+  }, []);
 
   const setActivePanel = (name) => setPanel(p => p === name ? null : name);
 
@@ -480,6 +495,7 @@ export default function MeetingPage() {
           <ChatPanel
             roomCode={code} userName={user?.name} onClose={() => setPanel(null)}
             chatAllowed={canManage || roomPermissions.chat}
+            messages={chatMessages}
           />
         )}
         {panel === 'participants' && (
