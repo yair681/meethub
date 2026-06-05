@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { db, initDB } = require('./db');
@@ -8,14 +9,16 @@ const meetingsRoutes = require('./routes/meetings');
 const adminRoutes = require('./routes/admin');
 const usersRoutes = require('./routes/users');
 
+const isProd = process.env.NODE_ENV === 'production';
+
 const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: 'http://localhost:5173', methods: ['GET', 'POST'] }
+  cors: isProd ? { origin: true } : { origin: 'http://localhost:5173', methods: ['GET', 'POST'] }
 });
 
-app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(cors(isProd ? { origin: true } : { origin: 'http://localhost:5173' }));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
@@ -310,5 +313,13 @@ io.on('connection', (socket) => {
 });
 
 initDB();
-const PORT = 3001;
-server.listen(PORT, () => console.log(`MeetHub backend running on http://localhost:${PORT}`));
+
+// In production: serve the built frontend
+if (isProd) {
+  const distPath = path.join(__dirname, '..', 'frontend', 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+}
+
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => console.log(`MeetHub running on port ${PORT}`));
