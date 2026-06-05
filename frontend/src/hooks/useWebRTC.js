@@ -21,6 +21,9 @@ export function useWebRTC({ roomCode, userId, userName }) {
   const [hostSocketId, setHostSocketId] = useState(null);
   const [coHosts, setCoHosts] = useState(new Set());
   const [roomPermissions, setRoomPermissions] = useState({ ...DEFAULT_PERMISSIONS });
+  const [isWaiting, setIsWaiting] = useState(false);
+  const [waitingParticipants, setWaitingParticipants] = useState([]);
+  const [waitingRoomEnabled, setWaitingRoomEnabled] = useState(false);
 
   const peerConns = useRef({});
   const localStreamRef = useRef(null);
@@ -140,10 +143,10 @@ export function useWebRTC({ roomCode, userId, userName }) {
   const grantCoHost = useCallback((targetSocketId) => socket.emit('grant-cohost', { targetSocketId, roomCode }), [roomCode]);
   const revokeCoHost = useCallback((targetSocketId) => socket.emit('revoke-cohost', { targetSocketId, roomCode }), [roomCode]);
   const transferHost = useCallback((targetSocketId) => socket.emit('transfer-host', { targetSocketId, roomCode }), [roomCode]);
-
-  const updatePermissions = useCallback((perms) => {
-    socket.emit('update-room-permissions', { roomCode, permissions: perms });
-  }, [roomCode]);
+  const updatePermissions = useCallback((perms) => socket.emit('update-room-permissions', { roomCode, permissions: perms }), [roomCode]);
+  const approveParticipant = useCallback((targetSocketId) => socket.emit('approve-participant', { targetSocketId, roomCode }), [roomCode]);
+  const rejectParticipant = useCallback((targetSocketId) => socket.emit('reject-participant', { targetSocketId, roomCode }), [roomCode]);
+  const toggleWaitingRoom = useCallback((enabled) => socket.emit('toggle-waiting-room', { roomCode, enabled }), [roomCode]);
 
   useEffect(() => {
     let mounted = true;
@@ -172,6 +175,18 @@ export function useWebRTC({ roomCode, userId, userName }) {
 
       socket.connect();
       socket.emit('join-room', { roomCode, userId, userName });
+
+      socket.on('you-are-waiting', () => {
+        if (mounted) setIsWaiting(true);
+      });
+
+      socket.on('waiting-room-update', (list) => {
+        if (mounted) setWaitingParticipants(list);
+      });
+
+      socket.on('room-settings', ({ waitingRoomEnabled: enabled }) => {
+        if (mounted) setWaitingRoomEnabled(enabled);
+      });
 
       socket.on('room-roles', ({ host, coHosts: chList }) => {
         setHostSocketId(host);
@@ -210,6 +225,8 @@ export function useWebRTC({ roomCode, userId, userName }) {
       });
 
       socket.on('existing-participants', async (participants) => {
+        if (!mounted) return;
+        setIsWaiting(false);
         for (const p of participants) {
           if (!mounted) return;
           setPeers(prev => ({ ...prev, [p.socketId]: { userId: p.userId, userName: p.userName, audio: p.audio, video: p.video, stream: null } }));
@@ -270,7 +287,8 @@ export function useWebRTC({ roomCode, userId, userName }) {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       screenStreamRef.current?.getTracks().forEach(t => t.stop());
       audioCtxRef.current?.close();
-      ['room-roles','room-permissions','host-transferred','you-are-cohost','forced-mute',
+      ['you-are-waiting','you-are-rejected','waiting-room-update','room-settings',
+       'room-roles','room-permissions','host-transferred','you-are-cohost','forced-mute',
        'forced-camera-off','forced-stop-screen','existing-participants','user-joined',
        'offer','answer','ice-candidate','user-left','peer-media-state','peer-screen-share','raise-hand'
       ].forEach(e => socket.off(e));
@@ -281,8 +299,10 @@ export function useWebRTC({ roomCode, userId, userName }) {
   return {
     localStream, peers, audioEnabled, videoEnabled, isScreenSharing, raisedHand,
     hostSocketId, coHosts, isHost, isCoHost, roomPermissions,
+    isWaiting, waitingParticipants, waitingRoomEnabled,
     toggleAudio, toggleVideo, toggleScreenShare, toggleHand,
     grantCoHost, revokeCoHost, transferHost, updatePermissions,
+    approveParticipant, rejectParticipant, toggleWaitingRoom,
     localStreamRef
   };
 }

@@ -25,7 +25,7 @@ app.use('/api/users', usersRoutes);
 
 const DEFAULT_PERMISSIONS = { chat: true, mic: true, camera: true, screen: true, reactions: true };
 
-// roomCode -> { participants: Map, host: socketId, coHosts: Set, permissions: {} }
+// roomCode -> { participants: Map, host: socketId, coHosts: Set, permissions: {}, waitingRoomEnabled: bool, waitingRoom: Map }
 const rooms = new Map();
 
 function getRoomState(roomCode) {
@@ -34,7 +34,9 @@ function getRoomState(roomCode) {
       participants: new Map(),
       host: null,
       coHosts: new Set(),
-      permissions: { ...DEFAULT_PERMISSIONS }
+      permissions: { ...DEFAULT_PERMISSIONS },
+      waitingRoomEnabled: false,
+      waitingRoom: new Map()
     });
   }
   return rooms.get(roomCode);
@@ -54,31 +56,51 @@ function broadcastRoomRoles(roomCode) {
   io.to(roomCode).emit('room-roles', { host: room.host, coHosts: Array.from(room.coHosts) });
 }
 
+function broadcastWaitingRoom(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+  const list = Array.from(room.waitingRoom.values());
+  if (room.host) io.to(room.host).emit('waiting-room-update', list);
+  for (const coHostId of room.coHosts) io.to(coHostId).emit('waiting-room-update', list);
+}
+
 function isAuthorized(room, socketId) {
   return room.host === socketId || room.coHosts.has(socketId);
+}
+
+function doJoin(room, roomCode, socket, userId, userName) {
+  socket.join(roomCode);
+  room.participants.set(socket.id, {
+    socketId: socket.id, userId, userName, audio: true, video: true, handRaised: false
+  });
+  if (!room.host) room.host = socket.id;
+
+  const others = Array.from(room.participants.entries())
+    .filter(([id]) => id !== socket.id)
+    .map(([, d]) => d);
+
+  socket.emit('existing-participants', others);
+  socket.emit('room-roles', { host: room.host, coHosts: Array.from(room.coHosts) });
+  socket.emit('room-permissions', room.permissions);
+  socket.emit('room-settings', { waitingRoomEnabled: room.waitingRoomEnabled });
+  socket.to(roomCode).emit('user-joined', { socketId: socket.id, userId, userName });
+  broadcastActiveMeetings();
 }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
 
   socket.on('join-room', ({ roomCode, userId, userName }) => {
-    socket.join(roomCode);
     currentRoom = roomCode;
     const room = getRoomState(roomCode);
-    room.participants.set(socket.id, {
-      socketId: socket.id, userId, userName, audio: true, video: true, handRaised: false
-    });
-    if (!room.host) room.host = socket.id;
 
-    const others = Array.from(room.participants.entries())
-      .filter(([id]) => id !== socket.id)
-      .map(([, d]) => d);
-
-    socket.emit('existing-participants', others);
-    socket.emit('room-roles', { host: room.host, coHosts: Array.from(room.coHosts) });
-    socket.emit('room-permissions', room.permissions);
-    socket.to(roomCode).emit('user-joined', { socketId: socket.id, userId, userName });
-    broadcastActiveMeetings();
+    if (!room.waitingRoomEnabled || room.participants.size === 0) {
+      doJoin(room, roomCode, socket, userId, userName);
+    } else {
+      room.waitingRoom.set(socket.id, { socketId: socket.id, userId, userName });
+      socket.emit('you-are-waiting');
+      broadcastWaitingRoom(roomCode);
+    }
   });
 
   // WebRTC signaling
@@ -135,23 +157,60 @@ io.on('connection', (socket) => {
     room.permissions = { ...room.permissions, ...permissions };
     io.to(roomCode).emit('room-permissions', room.permissions);
 
-    // Enforce: if mic turned off → force-mute non-authorized
     if (old.mic && !room.permissions.mic) {
       for (const [sid] of room.participants.entries()) {
         if (!isAuthorized(room, sid) && sid !== room.host) io.to(sid).emit('forced-mute');
       }
     }
-    // Enforce: if camera turned off → force-camera-off non-authorized
     if (old.camera && !room.permissions.camera) {
       for (const [sid] of room.participants.entries()) {
         if (!isAuthorized(room, sid) && sid !== room.host) io.to(sid).emit('forced-camera-off');
       }
     }
-    // Enforce: if screen turned off → force-stop-screen non-authorized
     if (old.screen && !room.permissions.screen) {
       for (const [sid] of room.participants.entries()) {
         if (!isAuthorized(room, sid) && sid !== room.host) io.to(sid).emit('forced-stop-screen');
       }
+    }
+  });
+
+  // ---- Waiting room management ----
+  socket.on('approve-participant', ({ targetSocketId, roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !isAuthorized(room, socket.id)) return;
+    const waiting = room.waitingRoom.get(targetSocketId);
+    if (!waiting) return;
+    room.waitingRoom.delete(targetSocketId);
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (!targetSocket) { broadcastWaitingRoom(roomCode); return; }
+    doJoin(room, roomCode, targetSocket, waiting.userId, waiting.userName);
+    broadcastWaitingRoom(roomCode);
+  });
+
+  socket.on('reject-participant', ({ targetSocketId, roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !isAuthorized(room, socket.id)) return;
+    const waiting = room.waitingRoom.get(targetSocketId);
+    if (!waiting) return;
+    room.waitingRoom.delete(targetSocketId);
+    io.to(targetSocketId).emit('you-are-rejected');
+    broadcastWaitingRoom(roomCode);
+  });
+
+  socket.on('toggle-waiting-room', ({ roomCode, enabled }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !isAuthorized(room, socket.id)) return;
+    room.waitingRoomEnabled = !!enabled;
+    io.to(roomCode).emit('room-settings', { waitingRoomEnabled: room.waitingRoomEnabled });
+
+    // If disabled, auto-approve everyone waiting
+    if (!enabled && room.waitingRoom.size > 0) {
+      for (const [sid, waiting] of [...room.waitingRoom.entries()]) {
+        room.waitingRoom.delete(sid);
+        const targetSocket = io.sockets.sockets.get(sid);
+        if (targetSocket) doJoin(room, roomCode, targetSocket, waiting.userId, waiting.userName);
+      }
+      broadcastWaitingRoom(roomCode);
     }
   });
 
@@ -206,6 +265,10 @@ io.on('connection', (socket) => {
   socket.on('end-meeting', ({ roomCode }) => {
     const room = rooms.get(roomCode);
     if (!room || room.host !== socket.id) return;
+    // Reject all waiting participants before ending
+    for (const [sid] of room.waitingRoom.entries()) {
+      io.to(sid).emit('you-are-rejected');
+    }
     io.to(roomCode).emit('meeting-ended');
     rooms.delete(roomCode);
     db.prepare("UPDATE meetings SET status='ended', ended_at=CURRENT_TIMESTAMP WHERE code=?").run(roomCode);
@@ -215,6 +278,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (currentRoom && rooms.has(currentRoom)) {
       const room = rooms.get(currentRoom);
+
+      // If they were waiting, just remove from queue
+      if (room.waitingRoom.has(socket.id)) {
+        room.waitingRoom.delete(socket.id);
+        broadcastWaitingRoom(currentRoom);
+        return;
+      }
+
       room.participants.delete(socket.id);
       room.coHosts.delete(socket.id);
       if (room.host === socket.id) {
@@ -224,6 +295,10 @@ io.on('connection', (socket) => {
         room.host = newHost;
       }
       if (room.participants.size === 0) {
+        // Reject everyone still waiting
+        for (const [sid] of room.waitingRoom.entries()) {
+          io.to(sid).emit('you-are-rejected');
+        }
         rooms.delete(currentRoom);
       } else {
         io.to(currentRoom).emit('user-left', { socketId: socket.id });

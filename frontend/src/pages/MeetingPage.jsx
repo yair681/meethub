@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebRTC } from '../hooks/useWebRTC';
@@ -53,15 +53,14 @@ function VideoGrid({ children }) {
 import React from 'react';
 
 /* ---- Permission Toggle Row ---- */
-function PermRow({ icon, label, permKey, permissions, onToggle }) {
-  const on = permissions[permKey];
+function PermRow({ icon, label, on, onToggle }) {
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-white/5 last:border-0">
       <span className="text-sm text-white flex items-center gap-2">
         <span>{icon}</span> {label}
       </span>
       <button
-        onClick={() => onToggle(permKey, !on)}
+        onClick={onToggle}
         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? 'bg-blue-600' : 'bg-gray-600'}`}
       >
         <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? 'translate-x-1' : 'translate-x-6'}`} />
@@ -70,14 +69,46 @@ function PermRow({ icon, label, permKey, permissions, onToggle }) {
   );
 }
 
+/* ---- Waiting Screen ---- */
+function WaitingScreen({ localStream, onCancel }) {
+  const videoRef = useRef(null);
+  useEffect(() => {
+    if (videoRef.current && localStream) {
+      videoRef.current.srcObject = localStream;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [localStream]);
+
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-meet-dark" dir="rtl">
+      <div className="flex flex-col items-center gap-6 max-w-sm w-full px-4">
+        {localStream && (
+          <div className="w-48 h-36 rounded-2xl overflow-hidden bg-gray-800 relative shadow-2xl">
+            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+          </div>
+        )}
+        <div className="text-center">
+          <div className="w-14 h-14 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-5"></div>
+          <h2 className="text-2xl font-bold text-white mb-2">ממתין לאישור כניסה</h2>
+          <p className="text-gray-400 text-sm">מנהל הפגישה יאשר את כניסתך בקרוב</p>
+        </div>
+        <button
+          onClick={onCancel}
+          className="px-8 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-full text-sm transition">
+          ביטול
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---- Management Panel ---- */
-function ManagementPanel({ participants, localUser, isHost, isCoHost, hostSocketId, coHosts,
-  roomCode, roomPermissions, onClose, onGrantCoHost, onRevokeCoHost, onTransferHost, onUpdatePermissions }) {
-
-  const handleToggle = (key, value) => {
-    onUpdatePermissions({ [key]: value });
-  };
-
+function ManagementPanel({
+  participants, localUser, isHost, isCoHost, hostSocketId, coHosts,
+  roomCode, roomPermissions, waitingRoomEnabled, waitingParticipants,
+  onClose, onGrantCoHost, onRevokeCoHost, onTransferHost,
+  onUpdatePermissions, onToggleWaitingRoom, onApprove, onReject
+}) {
   return (
     <div className="side-panel" dir="rtl">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
@@ -89,15 +120,54 @@ function ManagementPanel({ participants, localUser, isHost, isCoHost, hostSocket
 
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
 
+        {/* Waiting room approval queue */}
+        {waitingParticipants.length > 0 && (
+          <div>
+            <p className="text-xs text-yellow-400 font-medium uppercase tracking-wide mb-2 flex items-center gap-1">
+              <span>⏳</span> ממתינים לאישור ({waitingParticipants.length})
+            </p>
+            <div className="space-y-2">
+              {waitingParticipants.map(p => (
+                <div key={p.socketId} className="flex items-center gap-2 p-2.5 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+                  <div className="w-8 h-8 rounded-full bg-yellow-600/40 flex-shrink-0 flex items-center justify-center text-yellow-200 text-sm font-bold">
+                    {p.userName?.charAt(0)?.toUpperCase()}
+                  </div>
+                  <p className="flex-1 text-sm text-white truncate">{p.userName}</p>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <button onClick={() => onApprove(p.socketId)}
+                      className="text-xs px-2.5 py-1 bg-green-600 hover:bg-green-500 text-white rounded-full">
+                      אשר
+                    </button>
+                    <button onClick={() => onReject(p.socketId)}
+                      className="text-xs px-2.5 py-1 bg-red-700 hover:bg-red-600 text-white rounded-full">
+                      דחה
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Permissions section */}
         <div>
+          <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-3">הגדרות פגישה</p>
+          <div className="bg-white/5 rounded-xl px-4 py-1">
+            <PermRow
+              icon="🚪" label="חדר המתנה"
+              on={waitingRoomEnabled}
+              onToggle={() => onToggleWaitingRoom(!waitingRoomEnabled)}
+            />
+          </div>
+          <p className="text-xs text-gray-500 mt-1.5 mb-4">כשפעיל, משתתפים חדשים ממתינים לאישורך לפני הכניסה</p>
+
           <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-3">הרשאות משתתפים</p>
           <div className="bg-white/5 rounded-xl px-4 py-1">
-            <PermRow icon="💬" label="צ׳אט" permKey="chat" permissions={roomPermissions} onToggle={handleToggle} />
-            <PermRow icon="🎙️" label="מיקרופון" permKey="mic" permissions={roomPermissions} onToggle={handleToggle} />
-            <PermRow icon="📷" label="מצלמה" permKey="camera" permissions={roomPermissions} onToggle={handleToggle} />
-            <PermRow icon="🖥️" label="שיתוף מסך" permKey="screen" permissions={roomPermissions} onToggle={handleToggle} />
-            <PermRow icon="😊" label="תגובות" permKey="reactions" permissions={roomPermissions} onToggle={handleToggle} />
+            <PermRow icon="💬" label="צ׳אט" on={roomPermissions.chat} onToggle={() => onUpdatePermissions({ chat: !roomPermissions.chat })} />
+            <PermRow icon="🎙️" label="מיקרופון" on={roomPermissions.mic} onToggle={() => onUpdatePermissions({ mic: !roomPermissions.mic })} />
+            <PermRow icon="📷" label="מצלמה" on={roomPermissions.camera} onToggle={() => onUpdatePermissions({ camera: !roomPermissions.camera })} />
+            <PermRow icon="🖥️" label="שיתוף מסך" on={roomPermissions.screen} onToggle={() => onUpdatePermissions({ screen: !roomPermissions.screen })} />
+            <PermRow icon="😊" label="תגובות" on={roomPermissions.reactions} onToggle={() => onUpdatePermissions({ reactions: !roomPermissions.reactions })} />
           </div>
           <p className="text-xs text-gray-500 mt-2">מנהלים ראשיים ומשניים פטורים מהגבלות אלו</p>
         </div>
@@ -203,7 +273,7 @@ export default function MeetingPage() {
   const [meeting, setMeeting] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [panel, setPanel] = useState(null); // 'chat' | 'participants' | 'manage'
+  const [panel, setPanel] = useState(null);
   const [unreadChat, setUnreadChat] = useState(0);
   const [showEmojis, setShowEmojis] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -235,9 +305,24 @@ export default function MeetingPage() {
   const {
     localStream, peers, audioEnabled, videoEnabled, isScreenSharing,
     raisedHand, isHost, isCoHost, hostSocketId, coHosts, roomPermissions,
+    isWaiting, waitingParticipants, waitingRoomEnabled,
     toggleAudio, toggleVideo, toggleScreenShare, toggleHand,
-    grantCoHost, revokeCoHost, transferHost, updatePermissions
+    grantCoHost, revokeCoHost, transferHost, updatePermissions,
+    approveParticipant, rejectParticipant, toggleWaitingRoom
   } = useWebRTC({ roomCode: code, userId: user?.id, userName: user?.name });
+
+  // Toast when someone enters the waiting room
+  const prevWaitingCount = useRef(0);
+  useEffect(() => {
+    if (waitingParticipants.length > prevWaitingCount.current) {
+      const newest = waitingParticipants[waitingParticipants.length - 1];
+      toast(`${newest?.userName || 'מישהו'} מחכה לאישור כניסה`, {
+        icon: '⏳',
+        duration: 6000,
+      });
+    }
+    prevWaitingCount.current = waitingParticipants.length;
+  }, [waitingParticipants]);
 
   useEffect(() => {
     socket.on('kicked', () => {
@@ -246,6 +331,10 @@ export default function MeetingPage() {
     });
     socket.on('meeting-ended', () => {
       toast('הפגישה הסתיימה על ידי המנהל', { icon: 'ℹ️' });
+      navigate('/');
+    });
+    socket.on('you-are-rejected', () => {
+      toast.error('כניסתך לפגישה נדחתה');
       navigate('/');
     });
     socket.on('host-transferred', ({ to }) => {
@@ -258,6 +347,7 @@ export default function MeetingPage() {
     return () => {
       socket.off('kicked');
       socket.off('meeting-ended');
+      socket.off('you-are-rejected');
       socket.off('host-transferred');
       socket.off('you-are-cohost');
     };
@@ -296,6 +386,11 @@ export default function MeetingPage() {
     </div>
   );
 
+  // Show waiting screen while pending approval
+  if (isWaiting) return (
+    <WaitingScreen localStream={localStream} onCancel={() => navigate('/')} />
+  );
+
   const canManage = isHost || isCoHost;
 
   return (
@@ -332,6 +427,9 @@ export default function MeetingPage() {
         <div className="flex items-center gap-2">
           {isHost && <span className="text-xs bg-blue-600/30 text-blue-300 border border-blue-500/40 px-2 py-1 rounded-full">👑 מנהל ראשי</span>}
           {isCoHost && !isHost && <span className="text-xs bg-purple-600/30 text-purple-300 border border-purple-500/40 px-2 py-1 rounded-full">🛡️ מנהל משנה</span>}
+          {waitingRoomEnabled && canManage && (
+            <span className="text-xs bg-yellow-600/20 text-yellow-300 border border-yellow-500/30 px-2 py-1 rounded-full">🚪 חדר המתנה פעיל</span>
+          )}
           <div className="flex items-center gap-1 text-gray-300 text-sm">
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
               <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
@@ -401,9 +499,14 @@ export default function MeetingPage() {
             isHost={isHost} isCoHost={isCoHost}
             hostSocketId={hostSocketId} coHosts={coHosts}
             roomCode={code} roomPermissions={roomPermissions}
+            waitingRoomEnabled={waitingRoomEnabled}
+            waitingParticipants={waitingParticipants}
             onClose={() => setPanel(null)}
             onGrantCoHost={grantCoHost} onRevokeCoHost={revokeCoHost} onTransferHost={transferHost}
             onUpdatePermissions={updatePermissions}
+            onToggleWaitingRoom={toggleWaitingRoom}
+            onApprove={approveParticipant}
+            onReject={rejectParticipant}
           />
         )}
       </div>
@@ -521,8 +624,13 @@ export default function MeetingPage() {
           {canManage && (
             <div className="flex flex-col items-center gap-1">
               <button onClick={() => setActivePanel('manage')}
-                className={`control-btn ${panel === 'manage' ? 'ring-2 ring-yellow-400' : ''}`}>
+                className={`control-btn relative ${panel === 'manage' ? 'ring-2 ring-yellow-400' : ''}`}>
                 <span className="text-lg">⚙️</span>
+                {waitingParticipants.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                    {waitingParticipants.length}
+                  </span>
+                )}
               </button>
               <span className="text-xs text-gray-400">ניהול</span>
             </div>
