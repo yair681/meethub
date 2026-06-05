@@ -3,5 +3,7 @@ backend/node_modules/
 frontend/node_modules/
 frontend/dist/
 backend/meet.db
+backend/meet.db-shm
+backend/meet.db-wal
 backend.log
 backend-err.log
