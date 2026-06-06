@@ -69,6 +69,26 @@ function PermRow({ icon, label, on, onToggle }) {
   );
 }
 
+/* ---- Waiting For Host Screen ---- */
+function WaitingForHostScreen({ meetingTitle, onCancel }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-meet-dark" dir="rtl">
+      <div className="flex flex-col items-center gap-6 max-w-sm w-full px-4 text-center">
+        <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <div>
+          <h2 className="text-2xl font-bold text-white mb-2">ממתין למנהל הפגישה</h2>
+          {meetingTitle && <p className="text-gray-300 font-medium mb-1">{meetingTitle}</p>}
+          <p className="text-gray-400 text-sm">הפגישה תתחיל כשמנהל הפגישה ייכנס</p>
+        </div>
+        <button onClick={onCancel}
+          className="px-8 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-full text-sm transition">
+          ביטול
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---- Password Screen ---- */
 function PasswordScreen({ meetingTitle, meetingCode, onVerify }) {
   const [pw, setPw] = useState('');
@@ -414,7 +434,7 @@ export default function MeetingPage() {
   const {
     localStream, peers, audioEnabled, videoEnabled, isScreenSharing, screenStream, screenSharerId,
     raisedHand, isHost, isCoHost, hostSocketId, coHosts, roomPermissions,
-    isWaiting, waitingParticipants, waitingRoomEnabled,
+    isWaiting, isWaitingForHost, waitingParticipants, waitingRoomEnabled,
     toggleAudio, toggleVideo, toggleScreenShare, toggleHand,
     grantCoHost, revokeCoHost, transferHost, updatePermissions,
     approveParticipant, rejectParticipant, toggleWaitingRoom
@@ -524,6 +544,11 @@ export default function MeetingPage() {
       meetingCode={code}
       onVerify={() => setPasswordVerified(true)}
     />
+  );
+
+  // Show waiting-for-host screen
+  if (isWaitingForHost) return (
+    <WaitingForHostScreen meetingTitle={meeting?.title} onCancel={() => navigate('/')} />
   );
 
   // Show waiting screen while pending approval

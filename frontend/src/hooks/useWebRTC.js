@@ -24,6 +24,7 @@ export function useWebRTC({ roomCode, userId, userName, ready = true }) {
   const [coHosts, setCoHosts] = useState(new Set());
   const [roomPermissions, setRoomPermissions] = useState({ ...DEFAULT_PERMISSIONS });
   const [isWaiting, setIsWaiting] = useState(false);
+  const [isWaitingForHost, setIsWaitingForHost] = useState(false);
   const [waitingParticipants, setWaitingParticipants] = useState([]);
   const [waitingRoomEnabled, setWaitingRoomEnabled] = useState(false);
 
@@ -183,7 +184,11 @@ export function useWebRTC({ roomCode, userId, userName, ready = true }) {
       socket.emit('join-room', { roomCode, userId, userName });
 
       socket.on('you-are-waiting', () => {
-        if (mounted) setIsWaiting(true);
+        if (mounted) { setIsWaiting(true); setIsWaitingForHost(false); }
+      });
+
+      socket.on('waiting-for-host', () => {
+        if (mounted) setIsWaitingForHost(true);
       });
 
       socket.on('waiting-room-update', (list) => {
@@ -233,6 +238,7 @@ export function useWebRTC({ roomCode, userId, userName, ready = true }) {
       socket.on('existing-participants', async (participants) => {
         if (!mounted) return;
         setIsWaiting(false);
+        setIsWaitingForHost(false);
         for (const p of participants) {
           if (!mounted) return;
           setPeers(prev => ({ ...prev, [p.socketId]: { socketId: p.socketId, userId: p.userId, userName: p.userName, audio: p.audio, video: p.video, stream: null } }));
@@ -294,7 +300,7 @@ export function useWebRTC({ roomCode, userId, userName, ready = true }) {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       screenStreamRef.current?.getTracks().forEach(t => t.stop());
       audioCtxRef.current?.close();
-      ['you-are-waiting','you-are-rejected','waiting-room-update','room-settings',
+      ['you-are-waiting','you-are-rejected','waiting-for-host','waiting-room-update','room-settings',
        'room-roles','room-permissions','host-transferred','you-are-cohost','forced-mute',
        'forced-camera-off','forced-stop-screen','existing-participants','user-joined',
        'offer','answer','ice-candidate','user-left','peer-media-state','peer-screen-share','raise-hand'
@@ -306,7 +312,7 @@ export function useWebRTC({ roomCode, userId, userName, ready = true }) {
   return {
     localStream, peers, audioEnabled, videoEnabled, isScreenSharing, screenStream, screenSharerId,
     raisedHand, hostSocketId, coHosts, isHost, isCoHost, roomPermissions,
-    isWaiting, waitingParticipants, waitingRoomEnabled,
+    isWaiting, isWaitingForHost, waitingParticipants, waitingRoomEnabled,
     toggleAudio, toggleVideo, toggleScreenShare, toggleHand,
     grantCoHost, revokeCoHost, transferHost, updatePermissions,
     approveParticipant, rejectParticipant, toggleWaitingRoom,

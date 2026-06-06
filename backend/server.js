@@ -44,7 +44,8 @@ function getRoomState(roomCode) {
       coHosts: new Set(),
       permissions: { ...DEFAULT_PERMISSIONS, ...(savedSettings.permissions || {}) },
       waitingRoomEnabled: !!savedSettings.waitingRoomEnabled,
-      waitingRoom: new Map()
+      waitingRoom: new Map(),
+      waitingForHost: new Map()
     });
   }
   return rooms.get(roomCode);
@@ -112,12 +113,38 @@ io.on('connection', (socket) => {
     currentRoom = roomCode;
     const room = getRoomState(roomCode);
 
+    const meeting = db.prepare('SELECT host_id FROM meetings WHERE code = ?').get(roomCode);
+    const isCreator = !!(meeting?.host_id && userId && meeting.host_id === userId);
+
+    // If room is empty and this person is not the creator → wait for host
+    if (meeting?.host_id && room.participants.size === 0 && !isCreator) {
+      room.waitingForHost.set(socket.id, { socketId: socket.id, userId, userName });
+      socket.emit('waiting-for-host');
+      return;
+    }
+
     if (!room.waitingRoomEnabled || room.participants.size === 0) {
       doJoin(room, roomCode, socket, userId, userName);
     } else {
       room.waitingRoom.set(socket.id, { socketId: socket.id, userId, userName });
       socket.emit('you-are-waiting');
       broadcastWaitingRoom(roomCode);
+    }
+
+    // Creator just joined — admit everyone waiting for host
+    if (isCreator && room.waitingForHost.size > 0) {
+      for (const [sid, waiting] of [...room.waitingForHost.entries()]) {
+        room.waitingForHost.delete(sid);
+        const targetSocket = io.sockets.sockets.get(sid);
+        if (!targetSocket) continue;
+        if (room.waitingRoomEnabled) {
+          room.waitingRoom.set(sid, waiting);
+          targetSocket.emit('you-are-waiting');
+        } else {
+          doJoin(room, roomCode, targetSocket, waiting.userId, waiting.userName);
+        }
+      }
+      if (room.waitingRoomEnabled) broadcastWaitingRoom(roomCode);
     }
   });
 
@@ -286,6 +313,9 @@ io.on('connection', (socket) => {
     for (const [sid] of room.waitingRoom.entries()) {
       io.to(sid).emit('you-are-rejected');
     }
+    for (const [sid] of room.waitingForHost.entries()) {
+      io.to(sid).emit('meeting-ended');
+    }
     io.to(roomCode).emit('meeting-ended');
     const meeting = db.prepare('SELECT type FROM meetings WHERE code = ?').get(roomCode);
     if (meeting?.type === 'permanent') {
@@ -304,7 +334,13 @@ io.on('connection', (socket) => {
     if (currentRoom && rooms.has(currentRoom)) {
       const room = rooms.get(currentRoom);
 
-      // If they were waiting, just remove from queue
+      // If they were waiting for host, just remove from queue
+      if (room.waitingForHost.has(socket.id)) {
+        room.waitingForHost.delete(socket.id);
+        return;
+      }
+
+      // If they were in the waiting room, just remove from queue
       if (room.waitingRoom.has(socket.id)) {
         room.waitingRoom.delete(socket.id);
         broadcastWaitingRoom(currentRoom);
@@ -321,6 +357,9 @@ io.on('connection', (socket) => {
       }
       if (room.participants.size === 0) {
         for (const [sid] of room.waitingRoom.entries()) {
+          io.to(sid).emit('you-are-rejected');
+        }
+        for (const [sid] of room.waitingForHost.entries()) {
           io.to(sid).emit('you-are-rejected');
         }
         savePermanentSettings(currentRoom, room);
