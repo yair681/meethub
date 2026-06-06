@@ -33,16 +33,31 @@ const rooms = new Map();
 
 function getRoomState(roomCode) {
   if (!rooms.has(roomCode)) {
+    let savedSettings = {};
+    try {
+      const meeting = db.prepare('SELECT settings FROM meetings WHERE code = ?').get(roomCode);
+      if (meeting?.settings) savedSettings = JSON.parse(meeting.settings);
+    } catch {}
     rooms.set(roomCode, {
       participants: new Map(),
       host: null,
       coHosts: new Set(),
-      permissions: { ...DEFAULT_PERMISSIONS },
-      waitingRoomEnabled: false,
+      permissions: { ...DEFAULT_PERMISSIONS, ...(savedSettings.permissions || {}) },
+      waitingRoomEnabled: !!savedSettings.waitingRoomEnabled,
       waitingRoom: new Map()
     });
   }
   return rooms.get(roomCode);
+}
+
+function savePermanentSettings(roomCode, room) {
+  const meeting = db.prepare('SELECT type FROM meetings WHERE code = ?').get(roomCode);
+  if (meeting?.type === 'permanent') {
+    db.prepare('UPDATE meetings SET settings=? WHERE code=?').run(
+      JSON.stringify({ permissions: room.permissions, waitingRoomEnabled: room.waitingRoomEnabled }),
+      roomCode
+    );
+  }
 }
 
 function broadcastActiveMeetings() {
@@ -268,13 +283,20 @@ io.on('connection', (socket) => {
   socket.on('end-meeting', ({ roomCode }) => {
     const room = rooms.get(roomCode);
     if (!room || room.host !== socket.id) return;
-    // Reject all waiting participants before ending
     for (const [sid] of room.waitingRoom.entries()) {
       io.to(sid).emit('you-are-rejected');
     }
     io.to(roomCode).emit('meeting-ended');
+    const meeting = db.prepare('SELECT type FROM meetings WHERE code = ?').get(roomCode);
+    if (meeting?.type === 'permanent') {
+      db.prepare("UPDATE meetings SET status='active', settings=? WHERE code=?").run(
+        JSON.stringify({ permissions: room.permissions, waitingRoomEnabled: room.waitingRoomEnabled }),
+        roomCode
+      );
+    } else {
+      db.prepare("UPDATE meetings SET status='ended', ended_at=CURRENT_TIMESTAMP WHERE code=?").run(roomCode);
+    }
     rooms.delete(roomCode);
-    db.prepare("UPDATE meetings SET status='ended', ended_at=CURRENT_TIMESTAMP WHERE code=?").run(roomCode);
     broadcastActiveMeetings();
   });
 
@@ -298,10 +320,10 @@ io.on('connection', (socket) => {
         room.host = newHost;
       }
       if (room.participants.size === 0) {
-        // Reject everyone still waiting
         for (const [sid] of room.waitingRoom.entries()) {
           io.to(sid).emit('you-are-rejected');
         }
+        savePermanentSettings(currentRoom, room);
         rooms.delete(currentRoom);
       } else {
         io.to(currentRoom).emit('user-left', { socketId: socket.id });

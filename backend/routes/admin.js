@@ -1,10 +1,19 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const { db } = require('../db');
 const { adminMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
 router.use(adminMiddleware);
+
+router.post('/verify-password', (req, res) => {
+  const { password } = req.body;
+  const user = db.prepare('SELECT password FROM users WHERE id = ?').get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (!bcrypt.compareSync(password, user.password)) return res.status(401).json({ error: 'סיסמה שגויה' });
+  res.json({ ok: true });
+});
 
 router.get('/users', (req, res) => {
   const users = db.prepare('SELECT id, email, name, role, created_at FROM users ORDER BY created_at DESC').all();
@@ -13,8 +22,11 @@ router.get('/users', (req, res) => {
 
 router.patch('/users/:id', (req, res) => {
   const { name, email, role } = req.body;
-  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  const target = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (target.role === 'admin' && target.id !== req.user.id) {
+    return res.status(403).json({ error: 'אין אפשרות לערוך מנהל אחר' });
+  }
 
   db.prepare(`
     UPDATE users SET
@@ -27,10 +39,25 @@ router.patch('/users/:id', (req, res) => {
   res.json(db.prepare('SELECT id, email, name, role, created_at FROM users WHERE id = ?').get(req.params.id));
 });
 
+router.patch('/users/:id/password', (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ error: 'סיסמה חייבת להכיל לפחות 6 תווים' });
+  }
+  const target = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (target.role === 'admin' && target.id !== req.user.id) {
+    return res.status(403).json({ error: 'אין אפשרות לשנות סיסמת מנהל אחר' });
+  }
+  db.prepare('UPDATE users SET password = ? WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), req.params.id);
+  res.json({ ok: true });
+});
+
 router.delete('/users/:id', (req, res) => {
-  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  const target = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'User not found' });
   if (req.params.id === req.user.id) return res.status(400).json({ error: 'Cannot delete yourself' });
+  if (target.role === 'admin') return res.status(403).json({ error: 'אין אפשרות למחוק מנהל' });
 
   db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
   res.json({ success: true });

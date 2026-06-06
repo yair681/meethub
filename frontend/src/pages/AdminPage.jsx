@@ -34,6 +34,10 @@ export default function AdminPage() {
   const [editForm, setEditForm] = useState({});
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [verifyModal, setVerifyModal] = useState(null); // { action: fn }
+  const [adminPw, setAdminPw] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyErr, setVerifyErr] = useState('');
 
   useEffect(() => {
     Promise.all([
@@ -53,27 +57,55 @@ export default function AdminPage() {
     return () => { socket.off('active-meetings-update'); socket.disconnect(); };
   }, []);
 
-  const handleDeleteUser = async (id) => {
+  const requireAdminPassword = (action) => {
+    setAdminPw('');
+    setVerifyErr('');
+    setVerifyModal({ action });
+  };
+
+  const confirmAdminPassword = async () => {
+    setVerifyLoading(true);
+    setVerifyErr('');
+    try {
+      await api.post('/admin/verify-password', { password: adminPw });
+      setVerifyModal(null);
+      await verifyModal.action();
+    } catch (err) {
+      setVerifyErr(err.response?.data?.error || 'סיסמה שגויה');
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  const handleDeleteUser = (id) => {
     if (!confirm('למחוק משתמש זה? כל הפגישות שלו ימחקו גם כן.')) return;
-    await api.delete(`/admin/users/${id}`);
-    setUsers(prev => prev.filter(u => u.id !== id));
-    toast.success('המשתמש נמחק');
+    requireAdminPassword(async () => {
+      await api.delete(`/admin/users/${id}`);
+      setUsers(prev => prev.filter(u => u.id !== id));
+      toast.success('המשתמש נמחק');
+    });
   };
 
   const openEdit = (u) => {
     setEditUser(u);
-    setEditForm({ name: u.name, email: u.email, role: u.role });
+    setEditForm({ name: u.name, email: u.email, role: u.role, newPassword: '' });
   };
 
-  const handleUpdateUser = async () => {
-    try {
-      const res = await api.patch(`/admin/users/${editUser.id}`, editForm);
-      setUsers(prev => prev.map(u => u.id === editUser.id ? res.data : u));
-      setEditUser(null);
-      toast.success('המשתמש עודכן');
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'העדכון נכשל');
-    }
+  const handleUpdateUser = () => {
+    requireAdminPassword(async () => {
+      try {
+        const { newPassword, ...fields } = editForm;
+        const res = await api.patch(`/admin/users/${editUser.id}`, fields);
+        if (newPassword && newPassword.trim()) {
+          await api.patch(`/admin/users/${editUser.id}/password`, { newPassword: newPassword.trim() });
+        }
+        setUsers(prev => prev.map(u => u.id === editUser.id ? res.data : u));
+        setEditUser(null);
+        toast.success('המשתמש עודכן');
+      } catch (err) {
+        toast.error(err.response?.data?.error || 'העדכון נכשל');
+      }
+    });
   };
 
   const handleToggleSetting = async (key, current) => {
@@ -337,6 +369,12 @@ export default function AdminPage() {
                   <option value="admin">מנהל</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1">סיסמה חדשה <span className="text-gray-400 font-normal">(השאר ריק לאי-שינוי)</span></label>
+                <input type="password" value={editForm.newPassword || ''} onChange={e => setEditForm(f => ({ ...f, newPassword: e.target.value }))}
+                  placeholder="סיסמה חדשה (אופציונלי)"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" dir="ltr" />
+              </div>
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setEditUser(null)}
@@ -346,6 +384,36 @@ export default function AdminPage() {
               <button onClick={handleUpdateUser}
                 className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700">
                 שמור
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Password Verification Modal */}
+      {verifyModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl" dir="rtl">
+            <h3 className="text-lg font-semibold text-gray-800 mb-1">אימות מנהל</h3>
+            <p className="text-sm text-gray-500 mb-4">הכנס את הסיסמה שלך כדי להמשיך</p>
+            <input
+              type="password"
+              value={adminPw}
+              onChange={e => setAdminPw(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && adminPw && confirmAdminPassword()}
+              placeholder="הסיסמה שלך"
+              autoFocus
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2" dir="ltr"
+            />
+            {verifyErr && <p className="text-red-500 text-sm mb-3">{verifyErr}</p>}
+            <div className="flex gap-3 mt-3">
+              <button onClick={() => setVerifyModal(null)}
+                className="flex-1 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium">
+                ביטול
+              </button>
+              <button onClick={confirmAdminPassword} disabled={!adminPw || verifyLoading}
+                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
+                {verifyLoading ? 'מאמת...' : 'אמת'}
               </button>
             </div>
           </div>

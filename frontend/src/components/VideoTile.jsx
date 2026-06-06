@@ -17,8 +17,8 @@ function Initials({ name }) {
 export default function VideoTile({
   stream, name, audioEnabled = true, videoEnabled = true,
   handRaised = false, screenSharing = false, isLocal = false,
-  isHost = false, isCoHost = false, canManage = false,
-  onMute, onKick, socketId
+  isHost = false, isCoHost = false, isGuest = false, canManage = false,
+  onMute, onKick, socketId, fill = false
 }) {
   const videoRef = useRef(null);
 
@@ -37,7 +37,8 @@ export default function VideoTile({
   const isMirrored = isLocal && !screenSharing;
 
   return (
-    <div className={`video-tile relative group ${screenSharing ? 'screen-share' : ''}`}>
+    <div className={`video-tile relative group ${screenSharing ? 'screen-share' : ''}`}
+      style={fill ? { aspectRatio: 'unset', height: '100%' } : {}}>
       {/* Always keep video in DOM — just hide it when not needed so srcObject stays set */}
       <video
         ref={videoRef}
@@ -69,6 +70,7 @@ export default function VideoTile({
         {!audioEnabled && <span className="text-red-400 text-xs">🔇</span>}
         {!videoEnabled && <span className="text-gray-400 text-xs">📷</span>}
         <span>{name}{isLocal ? ' (את/אתה)' : ''}</span>
+        {isGuest && <span className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded-full">אורח</span>}
       </div>
 
       {/* Host controls overlay (appears on hover) */}

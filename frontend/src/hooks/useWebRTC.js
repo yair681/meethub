@@ -11,12 +11,14 @@ const ICE_SERVERS = {
 
 const DEFAULT_PERMISSIONS = { chat: true, mic: true, camera: true, screen: true, reactions: true };
 
-export function useWebRTC({ roomCode, userId, userName }) {
+export function useWebRTC({ roomCode, userId, userName, ready = true }) {
   const [localStream, setLocalStream] = useState(null);
   const [peers, setPeers] = useState({});
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [screenStream, setScreenStream] = useState(null);
+  const [screenSharerId, setScreenSharerId] = useState(null);
   const [raisedHand, setRaisedHand] = useState(false);
   const [hostSocketId, setHostSocketId] = useState(null);
   const [coHosts, setCoHosts] = useState(new Set());
@@ -82,6 +84,7 @@ export function useWebRTC({ roomCode, userId, userName }) {
     if (!isPrivileged && !roomPermissions.screen) return;
     if (isScreenSharing) {
       if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null; }
+      if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null; }
       screenStreamRef.current?.getTracks().forEach(t => t.stop());
       screenStreamRef.current = null;
       const camVideo = localStreamRef.current?.getVideoTracks()[0];
@@ -92,6 +95,7 @@ export function useWebRTC({ roomCode, userId, userName }) {
         const as = pc.getSenders().find(s => s.track?.kind === 'audio');
         if (as && micAudio) await as.replaceTrack(micAudio);
       }
+      setScreenStream(null);
       setIsScreenSharing(false);
       socket.emit('screen-share', { roomCode, sharing: false });
     } else {
@@ -126,6 +130,7 @@ export function useWebRTC({ roomCode, userId, userName }) {
           }
         }
         screenVideoTrack.onended = () => toggleScreenShare();
+        setScreenStream(ss);
         setIsScreenSharing(true);
         socket.emit('screen-share', { roomCode, sharing: true });
       } catch (err) {
@@ -149,6 +154,7 @@ export function useWebRTC({ roomCode, userId, userName }) {
   const toggleWaitingRoom = useCallback((enabled) => socket.emit('toggle-waiting-room', { roomCode, enabled }), [roomCode]);
 
   useEffect(() => {
+    if (!ready) return;
     let mounted = true;
 
     const init = async () => {
@@ -273,6 +279,7 @@ export function useWebRTC({ roomCode, userId, userName }) {
       });
       socket.on('peer-screen-share', ({ socketId, sharing }) => {
         setPeers(prev => ({ ...prev, [socketId]: { ...prev[socketId], screenSharing: sharing } }));
+        setScreenSharerId(prev => sharing ? socketId : (prev === socketId ? null : prev));
       });
       socket.on('raise-hand', ({ socketId, raised }) => {
         setPeers(prev => ({ ...prev, [socketId]: { ...prev[socketId], handRaised: raised } }));
@@ -294,11 +301,11 @@ export function useWebRTC({ roomCode, userId, userName }) {
       ].forEach(e => socket.off(e));
       socket.disconnect();
     };
-  }, []);
+  }, [ready]);
 
   return {
-    localStream, peers, audioEnabled, videoEnabled, isScreenSharing, raisedHand,
-    hostSocketId, coHosts, isHost, isCoHost, roomPermissions,
+    localStream, peers, audioEnabled, videoEnabled, isScreenSharing, screenStream, screenSharerId,
+    raisedHand, hostSocketId, coHosts, isHost, isCoHost, roomPermissions,
     isWaiting, waitingParticipants, waitingRoomEnabled,
     toggleAudio, toggleVideo, toggleScreenShare, toggleHand,
     grantCoHost, revokeCoHost, transferHost, updatePermissions,

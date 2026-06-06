@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { socket } from '../socket';
@@ -69,6 +69,56 @@ function PermRow({ icon, label, on, onToggle }) {
   );
 }
 
+/* ---- Password Screen ---- */
+function PasswordScreen({ meetingTitle, meetingCode, onVerify }) {
+  const [pw, setPw] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setErr('');
+    try {
+      await api.post(`/meetings/check-password/${meetingCode}`, { password: pw });
+      onVerify();
+    } catch (e) {
+      setErr(e.response?.data?.error || 'שגיאה');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-center h-screen bg-meet-dark" dir="rtl">
+      <div className="bg-meet-surface rounded-2xl shadow-2xl p-8 w-full max-w-sm flex flex-col gap-5">
+        <div className="text-center">
+          <p className="text-4xl mb-3">🔒</p>
+          <h1 className="text-xl font-bold text-white mb-1">{meetingTitle || meetingCode}</h1>
+          <p className="text-sm text-gray-400">הפגישה מוגנת בסיסמה</p>
+        </div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <input
+            type="password"
+            value={pw}
+            onChange={e => setPw(e.target.value)}
+            placeholder="סיסמת הפגישה"
+            autoFocus
+            className="bg-meet-dark text-white placeholder-gray-500 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-meet-blue border border-white/10"
+          />
+          {err && <p className="text-red-400 text-sm text-center">{err}</p>}
+          <button
+            type="submit"
+            disabled={!pw || loading}
+            className="w-full bg-meet-blue hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition">
+            {loading ? 'בודק...' : 'כניסה'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* ---- Waiting Screen ---- */
 function WaitingScreen({ localStream, onCancel }) {
   const videoRef = useRef(null);
@@ -97,6 +147,56 @@ function WaitingScreen({ localStream, onCancel }) {
           className="px-8 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-full text-sm transition">
           ביטול
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Guest Lobby ---- */
+function GuestLobbyScreen({ meetingCode, meetingTitle, onJoin }) {
+  const [name, setName] = useState('');
+  const trimmed = name.trim();
+  return (
+    <div className="flex items-center justify-center h-screen bg-meet-dark" dir="rtl">
+      <div className="bg-meet-surface rounded-2xl shadow-2xl p-8 w-full max-w-sm flex flex-col gap-5">
+        <div className="text-center">
+          <p className="text-4xl mb-3">🎥</p>
+          <h1 className="text-xl font-bold text-white mb-1">{meetingTitle || meetingCode}</h1>
+          <p className="text-sm text-gray-400">הצטרף לפגישה כאורח</p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label className="text-sm text-gray-400">כיצד תרצה שיקראו לך?</label>
+          <input
+            autoFocus
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && trimmed && onJoin(trimmed)}
+            placeholder="שם תצוגה"
+            maxLength={40}
+            className="bg-meet-dark text-white placeholder-gray-500 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-meet-blue border border-white/10"
+            dir="rtl"
+          />
+        </div>
+
+        <button
+          onClick={() => onJoin(trimmed)}
+          disabled={!trimmed}
+          className="w-full bg-meet-blue hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition">
+          הצטרף כאורח
+        </button>
+
+        <div className="relative flex items-center gap-3">
+          <div className="flex-1 h-px bg-white/10" />
+          <span className="text-xs text-gray-500">או</span>
+          <div className="flex-1 h-px bg-white/10" />
+        </div>
+
+        <Link
+          to={`/login?redirect=/meet/${meetingCode}`}
+          className="text-center text-sm text-meet-blue hover:text-blue-400 transition">
+          כניסה / הרשמה לחשבון
+        </Link>
       </div>
     </div>
   );
@@ -281,6 +381,13 @@ export default function MeetingPage() {
   const [showInfo, setShowInfo] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [joinTime] = useState(Date.now());
+  const [guestName, setGuestName] = useState('');
+  const [passwordVerified, setPasswordVerified] = useState(false);
+
+  const isGuest = !user;
+  const effectiveName = user?.name || guestName;
+  const needsPassword = !!(meeting?.hasPassword && !passwordVerified);
+  const ready = (!isGuest || !!guestName) && !needsPassword;
 
   useEffect(() => {
     api.get(`/meetings/join/${code}`).then(res => {
@@ -305,13 +412,13 @@ export default function MeetingPage() {
   };
 
   const {
-    localStream, peers, audioEnabled, videoEnabled, isScreenSharing,
+    localStream, peers, audioEnabled, videoEnabled, isScreenSharing, screenStream, screenSharerId,
     raisedHand, isHost, isCoHost, hostSocketId, coHosts, roomPermissions,
     isWaiting, waitingParticipants, waitingRoomEnabled,
     toggleAudio, toggleVideo, toggleScreenShare, toggleHand,
     grantCoHost, revokeCoHost, transferHost, updatePermissions,
     approveParticipant, rejectParticipant, toggleWaitingRoom
-  } = useWebRTC({ roomCode: code, userId: user?.id, userName: user?.name });
+  } = useWebRTC({ roomCode: code, userId: user?.id, userName: effectiveName, ready });
 
   // Toast when someone enters the waiting room
   const prevWaitingCount = useRef(0);
@@ -383,7 +490,7 @@ export default function MeetingPage() {
     <div className="flex items-center justify-center h-screen bg-meet-dark">
       <div className="text-center">
         <div className="w-12 h-12 border-4 border-meet-blue border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-        <p className="text-gray-400">מצטרף לפגישה...</p>
+        <p className="text-gray-400">טוען פגישה...</p>
       </div>
     </div>
   );
@@ -399,6 +506,24 @@ export default function MeetingPage() {
         </button>
       </div>
     </div>
+  );
+
+  // Guest lobby — shown after meeting info is loaded so we can show the title and detect errors
+  if (isGuest && !guestName) return (
+    <GuestLobbyScreen
+      meetingCode={code}
+      meetingTitle={meeting?.title}
+      onJoin={setGuestName}
+    />
+  );
+
+  // Password screen — shown before joining if meeting is password-protected
+  if (needsPassword) return (
+    <PasswordScreen
+      meetingTitle={meeting?.title}
+      meetingCode={code}
+      onVerify={() => setPasswordVerified(true)}
+    />
   );
 
   // Show waiting screen while pending approval
@@ -458,42 +583,111 @@ export default function MeetingPage() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Video area */}
         <div className="flex-1 overflow-hidden relative">
-          <VideoGrid>
-            <VideoTile
-              stream={localStream}
-              name={user?.name}
-              audioEnabled={audioEnabled}
-              videoEnabled={videoEnabled}
-              isLocal={true}
-              isHost={isHost}
-              isCoHost={isCoHost}
-            />
-            {Object.entries(peers).map(([sid, p]) => (
-              <VideoTile
-                key={sid}
-                socketId={sid}
-                stream={p.stream}
-                name={p.userName}
-                audioEnabled={p.audio}
-                videoEnabled={p.video}
-                handRaised={p.handRaised}
-                screenSharing={p.screenSharing}
-                isHost={sid === hostSocketId}
-                isCoHost={coHosts?.has(sid)}
-                canManage={canManage}
-                onMute={(id) => socket.emit('mute-participant', { targetSocketId: id, roomCode: code })}
-                onKick={(id) => socket.emit('kick-participant', { targetSocketId: id, roomCode: code })}
-              />
-            ))}
-          </VideoGrid>
+          {(() => {
+            const localIsPresenting = isScreenSharing;
+            const hasPresenter = localIsPresenting || !!screenSharerId;
+            const presenterStream = localIsPresenting ? screenStream : peers[screenSharerId]?.stream;
+            const presenterName = localIsPresenting ? effectiveName : peers[screenSharerId]?.userName;
 
-          <ReactionsOverlay roomCode={code} userName={user?.name} open={showEmojis} onClose={() => setShowEmojis(false)} />
+            if (hasPresenter) {
+              return (
+                <div className="flex h-full gap-2 p-2">
+                  {/* Main presenter area */}
+                  <div className="flex-1 min-w-0 rounded-2xl overflow-hidden bg-black">
+                    <VideoTile
+                      stream={presenterStream}
+                      name={presenterName}
+                      audioEnabled={localIsPresenting ? audioEnabled : peers[screenSharerId]?.audio ?? true}
+                      videoEnabled={true}
+                      isLocal={localIsPresenting}
+                      isHost={localIsPresenting ? isHost : screenSharerId === hostSocketId}
+                      isCoHost={localIsPresenting ? isCoHost : coHosts?.has(screenSharerId)}
+                      screenSharing={true}
+                      fill={true}
+                    />
+                  </div>
+                  {/* Participants strip */}
+                  <div className="w-44 flex flex-col gap-1.5 overflow-y-auto flex-shrink-0 py-1">
+                    {!localIsPresenting && (
+                      <div className="aspect-video rounded-xl overflow-hidden flex-shrink-0">
+                        <VideoTile
+                          stream={localStream}
+                          name={effectiveName}
+                          audioEnabled={audioEnabled}
+                          videoEnabled={videoEnabled}
+                          isLocal={true}
+                          isHost={isHost}
+                          isCoHost={isCoHost}
+                          isGuest={isGuest}
+                        />
+                      </div>
+                    )}
+                    {Object.entries(peers)
+                      .filter(([sid]) => sid !== screenSharerId)
+                      .map(([sid, p]) => (
+                        <div key={sid} className="aspect-video rounded-xl overflow-hidden flex-shrink-0">
+                          <VideoTile
+                            socketId={sid}
+                            stream={p.stream}
+                            name={p.userName}
+                            audioEnabled={p.audio}
+                            videoEnabled={p.video}
+                            handRaised={p.handRaised}
+                            isHost={sid === hostSocketId}
+                            isCoHost={coHosts?.has(sid)}
+                            isGuest={!p.userId}
+                            canManage={canManage}
+                            onMute={(id) => socket.emit('mute-participant', { targetSocketId: id, roomCode: code })}
+                            onKick={(id) => socket.emit('kick-participant', { targetSocketId: id, roomCode: code })}
+                          />
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <VideoGrid>
+                <VideoTile
+                  stream={localStream}
+                  name={effectiveName}
+                  audioEnabled={audioEnabled}
+                  videoEnabled={videoEnabled}
+                  isLocal={true}
+                  isHost={isHost}
+                  isCoHost={isCoHost}
+                  isGuest={isGuest}
+                />
+                {Object.entries(peers).map(([sid, p]) => (
+                  <VideoTile
+                    key={sid}
+                    socketId={sid}
+                    stream={p.stream}
+                    name={p.userName}
+                    audioEnabled={p.audio}
+                    videoEnabled={p.video}
+                    handRaised={p.handRaised}
+                    screenSharing={p.screenSharing}
+                    isHost={sid === hostSocketId}
+                    isCoHost={coHosts?.has(sid)}
+                    isGuest={!p.userId}
+                    canManage={canManage}
+                    onMute={(id) => socket.emit('mute-participant', { targetSocketId: id, roomCode: code })}
+                    onKick={(id) => socket.emit('kick-participant', { targetSocketId: id, roomCode: code })}
+                  />
+                ))}
+              </VideoGrid>
+            );
+          })()}
+
+          <ReactionsOverlay roomCode={code} userName={effectiveName} open={showEmojis} onClose={() => setShowEmojis(false)} />
         </div>
 
         {/* Side panel */}
         {panel === 'chat' && (
           <ChatPanel
-            roomCode={code} userName={user?.name} onClose={() => setPanel(null)}
+            roomCode={code} userName={effectiveName} onClose={() => setPanel(null)}
             chatAllowed={canManage || roomPermissions.chat}
             messages={chatMessages}
           />
@@ -501,7 +695,7 @@ export default function MeetingPage() {
         {panel === 'participants' && (
           <ParticipantsPanel
             participants={peers}
-            localUser={{ userName: user?.name, audio: audioEnabled, video: videoEnabled }}
+            localUser={{ userName: effectiveName, userId: user?.id, audio: audioEnabled, video: videoEnabled }}
             isHost={isHost} isCoHost={isCoHost}
             hostSocketId={hostSocketId} coHosts={coHosts}
             roomCode={code} onClose={() => setPanel(null)}
@@ -511,7 +705,7 @@ export default function MeetingPage() {
         {panel === 'manage' && canManage && (
           <ManagementPanel
             participants={peers}
-            localUser={{ userName: user?.name }}
+            localUser={{ userName: effectiveName }}
             isHost={isHost} isCoHost={isCoHost}
             hostSocketId={hostSocketId} coHosts={coHosts}
             roomCode={code} roomPermissions={roomPermissions}

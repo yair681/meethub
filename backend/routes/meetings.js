@@ -5,6 +5,25 @@ const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Public — no auth needed to look up a meeting by code (guests can join via link)
+router.get('/join/:code', (req, res) => {
+  const meeting = db.prepare('SELECT * FROM meetings WHERE code = ?').get(req.params.code);
+  if (!meeting) return res.status(404).json({ error: 'הפגישה לא נמצאה' });
+  if (meeting.status === 'ended') return res.status(410).json({ error: 'הפגישה הסתיימה' });
+  const host = db.prepare('SELECT id, name, email FROM users WHERE id = ?').get(meeting.host_id);
+  const { password, ...safeFields } = meeting;
+  res.json({ ...safeFields, hasPassword: !!password, host });
+});
+
+// Public — verify meeting password
+router.post('/check-password/:code', (req, res) => {
+  const meeting = db.prepare('SELECT password FROM meetings WHERE code = ?').get(req.params.code);
+  if (!meeting) return res.status(404).json({ error: 'הפגישה לא נמצאה' });
+  if (!meeting.password) return res.json({ ok: true });
+  if (req.body.password === meeting.password) return res.json({ ok: true });
+  return res.status(401).json({ error: 'סיסמה שגויה' });
+});
+
 router.use(authMiddleware);
 
 router.post('/', (req, res) => {
@@ -43,15 +62,6 @@ router.get('/my', (req, res) => {
     ORDER BY created_at DESC
   `).all(req.user.id);
   res.json(meetings);
-});
-
-router.get('/join/:code', (req, res) => {
-  const meeting = db.prepare('SELECT * FROM meetings WHERE code = ?').get(req.params.code);
-  if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
-  if (meeting.status === 'ended') return res.status(410).json({ error: 'Meeting has ended' });
-
-  const host = db.prepare('SELECT id, name, email FROM users WHERE id = ?').get(meeting.host_id);
-  res.json({ ...meeting, host });
 });
 
 router.delete('/:id', (req, res) => {
