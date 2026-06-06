@@ -22,6 +22,9 @@ function ParticipantRow({ p, viewerIsHost, viewerIsCoHost, hostSocketId, coHosts
           {isParticipantCoHost && !isParticipantHost && (
             <span className="text-xs bg-gray-600 text-white px-1.5 py-0.5 rounded-full">מנהל משנה</span>
           )}
+          {!p.userId && !isLocal && (
+            <span className="text-xs bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded-full">אורח</span>
+          )}
         </div>
         {p.handRaised && <p className="text-xs text-yellow-400">✋ מרים יד</p>}
       </div>
@@ -83,7 +86,7 @@ export default function ParticipantsPanel({
   roomCode, onClose, onGrantCoHost, onRevokeCoHost, onTransferHost
 }) {
   const allParticipants = [
-    { ...localUser, socketId: socket.id, isLocal: true },
+    { ...localUser, socketId: socket.id, isLocal: true, userId: localUser.userId ?? 'local' },
     ...Object.values(participants)
   ];
 

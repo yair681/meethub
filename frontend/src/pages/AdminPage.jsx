@@ -64,12 +64,14 @@ export default function AdminPage() {
   };
 
   const confirmAdminPassword = async () => {
+    const pendingAction = verifyModal?.action;
+    if (!pendingAction) return;
     setVerifyLoading(true);
     setVerifyErr('');
     try {
       await api.post('/admin/verify-password', { password: adminPw });
       setVerifyModal(null);
-      await verifyModal.action();
+      await pendingAction();
     } catch (err) {
       setVerifyErr(err.response?.data?.error || 'סיסמה שגויה');
     } finally {
@@ -236,11 +238,13 @@ export default function AdminPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
-                          <button onClick={() => openEdit(u)}
-                            className="text-xs px-3 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">
-                            עריכה
-                          </button>
-                          {u.id !== user?.id && (
+                          {(u.role !== 'admin' || u.id === user?.id) && (
+                            <button onClick={() => openEdit(u)}
+                              className="text-xs px-3 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">
+                              עריכה
+                            </button>
+                          )}
+                          {u.id !== user?.id && u.role !== 'admin' && (
                             <button onClick={() => handleDeleteUser(u.id)}
                               className="text-xs px-3 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-100">
                               מחיקה
