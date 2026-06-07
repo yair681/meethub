@@ -42,9 +42,9 @@ function CreateMeetingModal({ onClose, onCreate }) {
   };
 
   const types = [
-    { id: 'instant', label: 'מיידית', icon: '⚡', desc: 'התחל עכשיו' },
-    { id: 'scheduled', label: 'מתוזמנת', icon: '📅', desc: 'תכנן מראש' },
-    { id: 'permanent', label: 'קבועה', icon: '🔗', desc: 'קישור קבוע' },
+    { id: 'instant', label: 'מיידית', desc: 'התחל עכשיו' },
+    { id: 'scheduled', label: 'מתוזמנת', desc: 'תכנן מראש' },
+    { id: 'permanent', label: 'קבועה', desc: 'קישור קבוע' },
   ];
 
   return (
@@ -58,7 +58,6 @@ function CreateMeetingModal({ onClose, onCreate }) {
             {types.map(t => (
               <button key={t.id} onClick={() => setType(t.id)}
                 className={`p-3 rounded-xl border-2 text-center transition ${type === t.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                <div className="text-2xl mb-1">{t.icon}</div>
                 <div className="font-medium text-sm">{t.label}</div>
                 <div className="text-xs text-gray-500">{t.desc}</div>
               </button>

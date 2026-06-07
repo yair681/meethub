@@ -45,8 +45,11 @@ export default function VideoTile({
         autoPlay
         playsInline
         muted={isLocal}
-        className={`w-full h-full object-cover ${!showVideo ? 'hidden' : ''}`}
-        style={{ transform: isMirrored ? 'scaleX(-1)' : 'none' }}
+        className={`w-full h-full ${!showVideo ? 'hidden' : ''}`}
+        style={{
+          objectFit: screenSharing ? 'contain' : 'cover',
+          transform: isMirrored ? 'scaleX(-1)' : 'none',
+        }}
       />
       {!showVideo && <Initials name={name} />}
 

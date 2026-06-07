@@ -90,7 +90,7 @@ function isAuthorized(room, socketId) {
 function doJoin(room, roomCode, socket, userId, userName) {
   socket.join(roomCode);
   room.participants.set(socket.id, {
-    socketId: socket.id, userId, userName, audio: true, video: true, handRaised: false
+    socketId: socket.id, userId, userName, audio: true, video: true, handRaised: false, screenSharing: false
   });
   if (!room.host) room.host = socket.id;
 
@@ -190,6 +190,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomCode);
     if (!room) return;
     if (sharing && !room.permissions.screen && !isAuthorized(room, socket.id)) return;
+    if (room.participants.has(socket.id)) room.participants.get(socket.id).screenSharing = !!sharing;
     socket.to(roomCode).emit('peer-screen-share', { socketId: socket.id, sharing });
   });
 

@@ -239,9 +239,12 @@ export function useWebRTC({ roomCode, userId, userName, ready = true }) {
         if (!mounted) return;
         setIsWaiting(false);
         setIsWaitingForHost(false);
+        // Check if anyone is already screen sharing
+        const sharer = participants.find(p => p.screenSharing);
+        if (sharer) setScreenSharerId(sharer.socketId);
         for (const p of participants) {
           if (!mounted) return;
-          setPeers(prev => ({ ...prev, [p.socketId]: { socketId: p.socketId, userId: p.userId, userName: p.userName, audio: p.audio, video: p.video, stream: null } }));
+          setPeers(prev => ({ ...prev, [p.socketId]: { socketId: p.socketId, userId: p.userId, userName: p.userName, audio: p.audio, video: p.video, screenSharing: !!p.screenSharing, stream: null } }));
           const pc = createPC(p.socketId, stream);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
