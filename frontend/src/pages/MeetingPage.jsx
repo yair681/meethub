@@ -403,6 +403,9 @@ export default function MeetingPage() {
   const [joinTime] = useState(Date.now());
   const [guestName, setGuestName] = useState('');
   const [passwordVerified, setPasswordVerified] = useState(false);
+  const stripScrollRef = useRef(null);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
 
   const isGuest = !user;
   const effectiveName = user?.name || guestName;
@@ -503,6 +506,17 @@ export default function MeetingPage() {
     socket.on('chat-message', handler);
     return () => socket.off('chat-message', handler);
   }, []);
+
+  const handleStripScroll = useCallback(() => {
+    const el = stripScrollRef.current;
+    if (!el) return;
+    setCanScrollUp(el.scrollTop > 0);
+    setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+  }, []);
+
+  useEffect(() => {
+    setTimeout(handleStripScroll, 50);
+  }, [Object.keys(peers).length, isScreenSharing, screenSharerId, handleStripScroll]);
 
   const setActivePanel = (name) => setPanel(p => p === name ? null : name);
 
@@ -615,9 +629,16 @@ export default function MeetingPage() {
             const presenterName = localIsPresenting ? effectiveName : peers[screenSharerId]?.userName;
 
             if (hasPresenter) {
+              // Presenter's strip tile: local → show camera; remote → show avatar (screen is already in main)
+              const presenterStripStream = localIsPresenting ? localStream : null;
+              const presenterStripVideoEnabled = localIsPresenting ? videoEnabled : false;
+              const otherStripEntries = localIsPresenting
+                ? Object.entries(peers)
+                : Object.entries(peers).filter(([sid]) => sid !== screenSharerId);
+
               return (
                 <div className="flex h-full gap-2 p-2">
-                  {/* Main presenter area */}
+                  {/* Main area — full screen share */}
                   <div className="flex-1 min-w-0 rounded-2xl overflow-hidden bg-black">
                     <VideoTile
                       stream={presenterStream}
@@ -631,25 +652,50 @@ export default function MeetingPage() {
                       fill={true}
                     />
                   </div>
-                  {/* Participants strip */}
-                  <div className="w-44 flex flex-col gap-1.5 overflow-y-auto flex-shrink-0 py-1">
-                    {!localIsPresenting && (
-                      <div className="aspect-video rounded-xl overflow-hidden flex-shrink-0">
-                        <VideoTile
-                          stream={localStream}
-                          name={effectiveName}
-                          audioEnabled={audioEnabled}
-                          videoEnabled={videoEnabled}
-                          isLocal={true}
-                          isHost={isHost}
-                          isCoHost={isCoHost}
-                          isGuest={isGuest}
-                        />
-                      </div>
+
+                  {/* Side strip */}
+                  <div className="w-44 flex-shrink-0 relative flex flex-col">
+                    {/* Scroll up arrow */}
+                    {canScrollUp && (
+                      <button
+                        onClick={() => stripScrollRef.current?.scrollBy({ top: -112, behavior: 'smooth' })}
+                        className="absolute top-0 inset-x-0 z-10 flex items-center justify-center h-8 rounded-t-xl"
+                        style={{ background: 'linear-gradient(to bottom, #202124ee, transparent)' }}>
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white"><path d="M7 14l5-5 5 5z"/></svg>
+                      </button>
                     )}
-                    {Object.entries(peers)
-                      .filter(([sid]) => sid !== screenSharerId)
-                      .map(([sid, p]) => (
+
+                    <div
+                      ref={stripScrollRef}
+                      className="flex-1 overflow-y-auto flex flex-col gap-1.5 py-1"
+                      onScroll={handleStripScroll}
+                    >
+                      {/* Presenter tile — always first */}
+                      <div className="flex-shrink-0">
+                        <p className="text-xs text-blue-400 font-medium px-1 mb-1 flex items-center gap-1">
+                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3"><path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4z"/></svg>
+                          מציג מסך
+                        </p>
+                        <div className="aspect-video rounded-xl overflow-hidden ring-2 ring-blue-500">
+                          <VideoTile
+                            stream={presenterStripStream}
+                            name={presenterName}
+                            audioEnabled={localIsPresenting ? audioEnabled : peers[screenSharerId]?.audio ?? true}
+                            videoEnabled={presenterStripVideoEnabled}
+                            isLocal={localIsPresenting}
+                            isHost={localIsPresenting ? isHost : screenSharerId === hostSocketId}
+                            isCoHost={localIsPresenting ? isCoHost : coHosts?.has(screenSharerId)}
+                            isGuest={localIsPresenting ? isGuest : !peers[screenSharerId]?.userId}
+                            socketId={localIsPresenting ? undefined : screenSharerId}
+                            canManage={canManage && !localIsPresenting}
+                            onMute={localIsPresenting ? undefined : (id) => socket.emit('mute-participant', { targetSocketId: id, roomCode: code })}
+                            onKick={localIsPresenting ? undefined : (id) => socket.emit('kick-participant', { targetSocketId: id, roomCode: code })}
+                          />
+                        </div>
+                      </div>
+
+                      {/* All other participants */}
+                      {otherStripEntries.map(([sid, p]) => (
                         <div key={sid} className="aspect-video rounded-xl overflow-hidden flex-shrink-0">
                           <VideoTile
                             socketId={sid}
@@ -667,6 +713,17 @@ export default function MeetingPage() {
                           />
                         </div>
                       ))}
+                    </div>
+
+                    {/* Scroll down arrow */}
+                    {canScrollDown && (
+                      <button
+                        onClick={() => stripScrollRef.current?.scrollBy({ top: 112, behavior: 'smooth' })}
+                        className="absolute bottom-0 inset-x-0 z-10 flex items-center justify-center h-8 rounded-b-xl"
+                        style={{ background: 'linear-gradient(to top, #202124ee, transparent)' }}>
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white"><path d="M7 10l5 5 5-5z"/></svg>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
