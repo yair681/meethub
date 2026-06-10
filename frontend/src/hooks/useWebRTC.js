@@ -260,6 +260,14 @@ export function useWebRTC({ roomCode, userId, userName, ready = true }) {
       socket.on('offer', async ({ from, offer }) => {
         if (!mounted) return;
         const pc = createPC(from, stream);
+        // If currently screen sharing, replace camera track with screen track before answering
+        if (screenStreamRef.current) {
+          const screenVideoTrack = screenStreamRef.current.getVideoTracks()[0];
+          if (screenVideoTrack) {
+            const vs = pc.getSenders().find(s => s.track?.kind === 'video');
+            if (vs) await vs.replaceTrack(screenVideoTrack);
+          }
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
